@@ -48,7 +48,7 @@ describe('findFreeSpot', () => {
     expect(findFreeSpot(DEFAULT_HOME_LAYOUT, 2, 2)).toBeNull()
   })
   it('finds the hole left by a removed tile', () => {
-    const layout = DEFAULT_HOME_LAYOUT.filter((t) => t.type !== 'meals')
+    const layout = DEFAULT_HOME_LAYOUT.filter((t) => t.type !== 'callFamily')
     expect(findFreeSpot(layout, 2, 2)).toEqual({ x: 9, y: 0 })
   })
 })

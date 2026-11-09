@@ -1,4 +1,3 @@
-import { app, ipcMain, BrowserWindow } from 'electron'
 import { DateTime } from 'luxon'
 import type { ZodType } from 'zod'
 import { ZodError } from 'zod'
@@ -19,14 +18,40 @@ import type { ChoresService } from '../services/choresService'
 import type { RewardsService } from '../services/rewardsService'
 import type { ListsService } from '../services/listsService'
 import type { MealsService } from '../services/mealsService'
-import type { Kiosk } from '../kiosk/kiosk'
-import type { Updater } from '../updater'
+import { broadcast } from '../bus'
 import type { RssService } from '../services/rssService'
 import type { CameraService } from '../services/cameraService'
 import type { BirdNetService } from '../services/birdnetService'
 import type { CompanionServer } from '../companion/companionServer'
+import type { ContactsService } from '../services/contactsService'
+import type { AlbumService } from '../services/albumService'
+import type { NestService } from '../services/nestService'
+
+/** What the router needs from the display runtime (Electron kiosk or headless server). */
+export interface KioskApi {
+  listPhotos(): string[]
+  pickFolder(): Promise<{ folder: string | null }>
+  previewScreensaver(): void
+  setLaunchOnStartup(enabled: boolean): void
+}
+
+export interface UpdaterApi {
+  quitAndInstall(): void
+}
+
+/** Server-mode screen pairing (absent on the desktop app). */
+export interface DisplayPairingApi {
+  issueCode(): { code: string; expiresAt: string }
+}
+
+export interface AppInfo {
+  version: string
+  /** 'desktop' = Electron kiosk; 'server' = headless server + browser displays */
+  mode: 'desktop' | 'server'
+}
 
 export interface Services {
+  appInfo: AppInfo
   settings: SettingsService
   people: PeopleService
   calendars: CalendarService
@@ -41,12 +66,18 @@ export interface Services {
   rewards: RewardsService
   lists: ListsService
   meals: MealsService
-  kiosk: Kiosk
-  updater: Updater
+  kiosk: KioskApi
+  updater: UpdaterApi
   rss: RssService
   camera: CameraService
   birdnet: BirdNetService
   companion: CompanionServer
+  contacts: ContactsService
+  album: AlbumService
+  nest: NestService
+  /** Maps a cached album file name to a URL the display can load. */
+  albumPhotoUrl: (fileName: string) => string
+  displayPairing?: DisplayPairingApi
 }
 
 /**
@@ -78,11 +109,22 @@ const PARENT_GATED: Set<IpcChannel> = new Set([
   'camera:add',
   'camera:remove',
   'companion:issueToken',
-  'companion:unpairAll'
+  'companion:unpairAll',
+  'contacts:create',
+  'contacts:update',
+  'contacts:delete',
+  'album:refresh',
+  'display:issuePairCode',
+  'google:beginPasteBack',
+  'google:finishPasteBack',
+  'nest:setCredentials',
+  'nest:beginConnect',
+  'nest:finishConnect',
+  'nest:disconnect'
 ])
 
 /** Channels that mutate data, mapped to the domain the renderer should refetch. */
-type MutationDomain = 'events' | 'people' | 'calendars' | 'settings' | 'lists' | 'meals' | 'chores'
+type MutationDomain = 'events' | 'people' | 'calendars' | 'settings' | 'lists' | 'meals' | 'chores' | 'contacts'
 const MUTATION_DOMAINS: Partial<Record<IpcChannel, MutationDomain>> = {
   'settings:set': 'settings',
   'people:create': 'people',
@@ -110,14 +152,16 @@ const MUTATION_DOMAINS: Partial<Record<IpcChannel, MutationDomain>> = {
   'chores:update': 'chores',
   'chores:delete': 'chores',
   'chores:complete': 'chores',
-  'chores:uncomplete': 'chores'
+  'chores:uncomplete': 'chores',
+  'rewards:redeem': 'chores',
+  'rewards:grant': 'chores',
+  'google:finishPasteBack': 'calendars',
+  'contacts:create': 'contacts',
+  'contacts:update': 'contacts',
+  'contacts:delete': 'contacts'
 }
 
-export function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload)
-  }
-}
+export { broadcast }
 
 interface ChannelEntry {
   schema: ZodType | null
@@ -159,12 +203,6 @@ export async function dispatch<K extends IpcChannel>(
   }
 }
 
-export function registerIpcHandlers(services: Services, table: ChannelTable): void {
-  for (const channel of table.keys()) {
-    ipcMain.handle(channel, (_event, payload) => dispatch(services, table, channel, payload, { gate: 'pin' }))
-  }
-}
-
 /** The single channel → {schema, handler} map consumed by ipcMain AND the companion HTTP API. */
 export function buildChannelTable(services: Services): ChannelTable {
   const table: ChannelTable = new Map()
@@ -177,7 +215,8 @@ export function buildChannelTable(services: Services): ChannelTable {
   }
 
   handle('app:getInfo', null, () => ({
-    version: app.getVersion(),
+    version: services.appInfo.version,
+    mode: services.appInfo.mode,
     platform: process.platform,
     zone: DateTime.local().zoneName ?? 'UTC'
   }))
@@ -188,6 +227,7 @@ export function buildChannelTable(services: Services): ChannelTable {
     const result = services.settings.set(req.patch)
     if (req.patch.launchOnStartup !== undefined) services.kiosk.setLaunchOnStartup(req.patch.launchOnStartup)
     if (req.patch.companion !== undefined) services.companion.applySettings()
+    if (req.patch.album !== undefined) void services.album.refresh()
     return result
   })
 
@@ -195,6 +235,30 @@ export function buildChannelTable(services: Services): ChannelTable {
   handle('people:create', s.personCreateSchema, (req) => services.people.create(req))
   handle('people:update', s.personUpdateSchema, (req) => services.people.update(req))
   handle('people:delete', s.idSchema, (req) => services.people.remove(req.id))
+
+  handle('contacts:list', null, () => services.contacts.list())
+  handle('contacts:create', s.contactCreateSchema, (req) => services.contacts.create(req))
+  handle('contacts:update', s.contactUpdateSchema, (req) => services.contacts.update(req))
+  handle('contacts:delete', s.idSchema, (req) => services.contacts.remove(req.id))
+
+  handle('album:getStatus', null, () => services.album.getStatus())
+  handle('album:refresh', null, () => void services.album.refresh())
+  handle('nest:getStatus', null, () => services.nest.getStatus())
+  handle('nest:setCredentials', s.nestCredentialsSchema, (req) => services.nest.setCredentials(req))
+  handle('nest:beginConnect', null, () => services.nest.beginConnect())
+  handle('nest:finishConnect', s.pasteBackSchema, (req) => services.nest.finishConnect(req.url))
+  handle('nest:disconnect', null, () => services.nest.disconnect())
+  handle('nest:listCameras', null, () => services.nest.listCameras())
+  handle('nest:startStream', s.nestStartSchema, (req) => services.nest.startStream(req.deviceId, req.offerSdp))
+  handle('nest:extendStream', s.nestSessionSchema, (req) =>
+    services.nest.extendStream(req.deviceId, req.mediaSessionId)
+  )
+  handle('nest:stopStream', s.nestSessionSchema, (req) => services.nest.stopStream(req.deviceId, req.mediaSessionId))
+
+  handle('display:issuePairCode', null, () => {
+    if (!services.displayPairing) throw new AppError('UNSUPPORTED', 'Only the home server can pair screens')
+    return services.displayPairing.issueCode()
+  })
 
   handle('calendars:list', null, () => services.calendars.list())
   handle('calendars:create', s.calendarCreateSchema, (req) => services.calendars.create(req))
@@ -216,6 +280,12 @@ export function buildChannelTable(services: Services): ChannelTable {
   )
   handle('google:connect', null, async () => {
     const result = await services.googleAuth.connect()
+    services.syncManager.syncNow()
+    return result
+  })
+  handle('google:beginPasteBack', null, () => services.googleAuth.beginPasteBack())
+  handle('google:finishPasteBack', s.pasteBackSchema, async (req) => {
+    const result = await services.googleAuth.finishPasteBack(req.url)
     services.syncManager.syncNow()
     return result
   })
@@ -288,7 +358,10 @@ export function buildChannelTable(services: Services): ChannelTable {
   handle('weather:searchCity', s.citySearchSchema, (req) => services.weather.searchCity(req.query))
 
   handle('screensaver:pickFolder', null, () => services.kiosk.pickFolder())
-  handle('screensaver:listPhotos', null, () => services.kiosk.listPhotos())
+  handle('screensaver:listPhotos', null, () => [
+    ...services.album.listFiles().map(services.albumPhotoUrl),
+    ...services.kiosk.listPhotos()
+  ])
   handle('kiosk:previewScreensaver', null, () => services.kiosk.previewScreensaver())
 
   handle('companion:getStatus', null, () => services.companion.getStatus())

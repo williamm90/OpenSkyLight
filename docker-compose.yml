@@ -1,0 +1,16 @@
+services:
+  openskylight:
+    build: .
+    container_name: openskylight
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # wall display
+      - "8420:8420" # phone companion app
+    environment:
+      # set to your time zone so chores, sleep times and "today" are right
+      TZ: America/New_York
+    volumes:
+      - ./data:/data
+      # optional: a folder of family photos for the screensaver
+      # (then set the folder to /photos in Settings → General)
+      # - /path/to/photos:/photos:ro

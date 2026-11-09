@@ -22,13 +22,23 @@ export function normalizeBirdnetUrl(rawUrl: string): string {
   return parsed.origin
 }
 
+export type BirdImageUrl = (origin: string, scientificName: string) => string
+
 /** osl-bird:// proxy URL so the sandboxed renderer loads the photo via the main process. */
-function imageUrl(origin: string, scientificName: string): string {
-  return `osl-bird://image?base=${encodeURIComponent(origin)}&sci=${encodeURIComponent(scientificName)}`
-}
+export const electronBirdImageUrl: BirdImageUrl = (origin, scientificName) =>
+  `osl-bird://image?base=${encodeURIComponent(origin)}&sci=${encodeURIComponent(scientificName)}`
+
+/** Same-origin HTTP proxy path used by the headless server. */
+export const httpBirdImageUrl: BirdImageUrl = (origin, scientificName) =>
+  `/media/bird?base=${encodeURIComponent(origin)}&sci=${encodeURIComponent(scientificName)}`
 
 /** Pure: map BirdNET-Go's /api/v2/detections JSON into our DTO list. Never throws. */
-export function parseDetections(json: unknown, origin: string, limit = MAX_ITEMS): Detection[] {
+export function parseDetections(
+  json: unknown,
+  origin: string,
+  limit = MAX_ITEMS,
+  imageUrl: BirdImageUrl = electronBirdImageUrl
+): Detection[] {
   const rows = (json as { data?: unknown })?.data
   if (!Array.isArray(rows)) return []
   const out: Detection[] = []
@@ -52,7 +62,7 @@ export function parseDetections(json: unknown, origin: string, limit = MAX_ITEMS
   return out
 }
 
-export function createBirdNetService() {
+export function createBirdNetService(imageUrl: BirdImageUrl = electronBirdImageUrl) {
   const cache = new Map<string, { data: BirdNetDto; atMs: number }>()
 
   async function getDetections(rawUrl: string): Promise<BirdNetDto> {
@@ -67,7 +77,7 @@ export function createBirdNetService() {
         headers: { Accept: 'application/json', 'User-Agent': 'OpenSkyLight/1.0 (family calendar display)' }
       })
       if (!res.ok) throw new Error(`BirdNET-Go returned HTTP ${res.status}`)
-      const detections = parseDetections(await res.json(), origin)
+      const detections = parseDetections(await res.json(), origin, MAX_ITEMS, imageUrl)
       const data: BirdNetDto = { url: origin, label: 'Birds', detections, fetchedAt: new Date().toISOString() }
       cache.set(origin, { data, atMs: Date.now() })
       return data

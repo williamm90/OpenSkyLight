@@ -1,10 +1,19 @@
 import { useState } from 'react'
-import type { CalendarDto, ChoreDto, PersonDto, PersonRole, RecurrenceInput, RewardDto } from '@shared/types'
+import type { CalendarDto, ChoreDto, ContactDto, PersonDto, PersonRole, RecurrenceInput, RewardDto } from '@shared/types'
 import { PERSON_COLORS } from '@shared/types'
 import { describeRecurrence } from '@shared/recurrence/build'
 import {
+  useAlbumRefresh,
+  useAlbumStatus,
+  useAppInfo,
   useAuthMutations,
   useAuthStatus,
+  useContactMutations,
+  useContacts,
+  useGooglePasteBack,
+  useNestMutations,
+  useNestStatus,
+  useIssuePairCode,
   useCalendarMutations,
   useCalendars,
   useCompanionMutations,
@@ -33,7 +42,10 @@ import { useUi } from '../../stores/uiStore'
 import { BigButton, Dialog, FieldLabel, SegmentedControl, Sheet, Toggle } from '../../components/ui'
 import { OskInput } from '../../components/Osk'
 import { PlusIcon } from '../../components/icons'
-import { initials, textOn } from '../../lib/format'
+import { textOn } from '../../lib/format'
+import { Avatar } from '../../components/Avatar'
+import { PhotoPicker } from '../../components/PhotoPicker'
+import { formatPhone } from '@shared/callLink'
 import QRCode from 'qrcode'
 
 type Tab = 'family' | 'calendars' | 'chores' | 'general'
@@ -118,11 +130,14 @@ function ColorGrid({ value, onChange }: { value: string; onChange: (color: strin
 
 function FamilyTab() {
   const { data: people = [] } = usePeople()
+  const { data: rewards = [] } = useRewards()
   const mutations = usePeopleMutations()
   const [editing, setEditing] = useState<PersonDto | 'new' | null>(null)
   const [name, setName] = useState('')
   const [color, setColor] = useState<string>(PERSON_COLORS[0])
   const [role, setRole] = useState<PersonRole>('child')
+  const [photo, setPhoto] = useState<string | null>(null)
+  const [goalRewardId, setGoalRewardId] = useState<string | null>(null)
 
   const openEditor = (p: PersonDto | 'new'): void => {
     setEditing(p)
@@ -130,17 +145,31 @@ function FamilyTab() {
       setName('')
       setColor(PERSON_COLORS[people.length % PERSON_COLORS.length])
       setRole('child')
+      setPhoto(null)
+      setGoalRewardId(null)
     } else {
       setName(p.name)
       setColor(p.color)
       setRole(p.role)
+      setPhoto(p.photo)
+      setGoalRewardId(p.goalRewardId)
     }
   }
 
   const save = (): void => {
     if (!name.trim()) return
-    if (editing === 'new') mutations.create.mutate({ name: name.trim(), color, role })
-    else if (editing) mutations.update.mutate({ id: editing.id, name: name.trim(), color, role })
+    if (editing === 'new') {
+      mutations.create.mutate(
+        { name: name.trim(), color, role, photo },
+        {
+          onSuccess: (created) => {
+            if (goalRewardId) mutations.update.mutate({ id: created.id, goalRewardId })
+          }
+        }
+      )
+    } else if (editing) {
+      mutations.update.mutate({ id: editing.id, name: name.trim(), color, role, photo, goalRewardId })
+    }
     setEditing(null)
   }
 
@@ -153,15 +182,15 @@ function FamilyTab() {
           onClick={() => openEditor(p)}
           className="pressable flex items-center gap-4 rounded-2xl bg-paper-deep/50 p-3 text-left hover:bg-paper-deep"
         >
-          <span
-            className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-extrabold"
-            style={{ backgroundColor: p.color, color: textOn(p.color) }}
-          >
-            {initials(p.name)}
-          </span>
+          <Avatar name={p.name} color={p.color} photo={p.photo} size={56} />
           <span className="flex-1">
             <span className="block text-xl font-bold">{p.name}</span>
-            <span className="block text-sm font-bold text-ink-faint capitalize">{p.role}</span>
+            <span className="block text-sm font-bold text-ink-faint capitalize">
+              {p.role}
+              {p.role === 'child' && p.goalRewardId && (
+                <> · goal: {rewards.find((r) => r.id === p.goalRewardId)?.title ?? '—'}</>
+              )}
+            </span>
           </span>
         </button>
       ))}
@@ -171,12 +200,17 @@ function FamilyTab() {
         </span>
       </BigButton>
 
+      <div className="mt-6">
+        <ContactsSection />
+      </div>
+
       <Dialog
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={editing === 'new' ? 'Add family member' : 'Edit family member'}
       >
         <div className="flex flex-col gap-4">
+          <PhotoPicker name={name} color={color} photo={photo} onChange={setPhoto} />
           <div>
             <FieldLabel>Name</FieldLabel>
             <OskInput value={name} onChange={setName} placeholder="Name" autoFocus={editing === 'new'} />
@@ -196,6 +230,33 @@ function FamilyTab() {
               ]}
             />
           </div>
+          {role === 'child' && (
+            <div>
+              <FieldLabel>Sticker card goal</FieldLabel>
+              {rewards.length === 0 ? (
+                <p className="text-sm font-semibold text-ink-faint">Add rewards in the Chores tab first.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {[{ id: null, title: 'No goal', costStars: 0 }, ...rewards].map((r) => {
+                    const on = goalRewardId === r.id
+                    return (
+                      <button
+                        key={r.id ?? 'none'}
+                        type="button"
+                        onClick={() => setGoalRewardId(r.id)}
+                        className={`pressable rounded-full border-2 px-4 py-2 text-base font-bold ${
+                          on ? 'border-transparent bg-ember text-white' : 'border-line bg-card text-ink-soft'
+                        }`}
+                      >
+                        {r.title}
+                        {r.costStars > 0 && <span className="ml-1.5 opacity-75">· {r.costStars} stickers</span>}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-2 flex gap-3">
             {editing !== 'new' && editing && (
               <BigButton
@@ -218,6 +279,157 @@ function FamilyTab() {
           </div>
         </div>
       </Dialog>
+    </div>
+  )
+}
+
+
+/** People the kids can call with one tap (they're dialed through Google Voice on the tablet). */
+function ContactsSection() {
+  const { data: contacts = [] } = useContacts()
+  const mutations = useContactMutations()
+  const [editing, setEditing] = useState<ContactDto | 'new' | null>(null)
+  const [name, setName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [color, setColor] = useState<string>(PERSON_COLORS[3])
+  const [photo, setPhoto] = useState<string | null>(null)
+
+  const openEditor = (c: ContactDto | 'new'): void => {
+    setEditing(c)
+    if (c === 'new') {
+      setName('')
+      setPhone('')
+      setColor(PERSON_COLORS[(contacts.length + 3) % PERSON_COLORS.length])
+      setPhoto(null)
+    } else {
+      setName(c.name)
+      setPhone(c.phone)
+      setColor(c.color)
+      setPhoto(c.photo)
+    }
+  }
+
+  const save = (): void => {
+    const input = { name: name.trim(), phone: phone.trim(), color, photo }
+    const done = { onSuccess: () => setEditing(null) }
+    if (editing === 'new') mutations.create.mutate(input, done)
+    else if (editing) mutations.update.mutate({ id: editing.id, ...input }, done)
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <FieldLabel>People to call</FieldLabel>
+      <p className="-mt-1 text-sm font-semibold text-ink-faint">
+        Kids tap a photo to call. On the tablet the call goes through the Google Voice app.
+      </p>
+      {contacts.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          onClick={() => openEditor(c)}
+          className="pressable flex items-center gap-4 rounded-2xl bg-paper-deep/50 p-3 text-left hover:bg-paper-deep"
+        >
+          <Avatar name={c.name} color={c.color} photo={c.photo} size={56} />
+          <span className="flex-1">
+            <span className="block text-xl font-bold">{c.name}</span>
+            <span className="block text-sm font-bold text-ink-faint">{formatPhone(c.phone)}</span>
+          </span>
+        </button>
+      ))}
+      <BigButton variant="ghost" onClick={() => openEditor('new')}>
+        <span className="flex items-center justify-center gap-2">
+          <PlusIcon size={20} /> Add someone to call
+        </span>
+      </BigButton>
+
+      <Dialog
+        open={editing !== null}
+        onClose={() => setEditing(null)}
+        title={editing === 'new' ? 'Add someone to call' : 'Edit contact'}
+      >
+        <div className="flex flex-col gap-4">
+          <PhotoPicker name={name} color={color} photo={photo} onChange={setPhoto} />
+          <div>
+            <FieldLabel>Name the kids know them by</FieldLabel>
+            <OskInput value={name} onChange={setName} placeholder="e.g. Grandma" autoFocus={editing === 'new'} />
+          </div>
+          <div>
+            <FieldLabel>Phone number</FieldLabel>
+            <OskInput value={phone} onChange={setPhone} placeholder="+1 555 123 4567" />
+          </div>
+          <div>
+            <FieldLabel>Color</FieldLabel>
+            <ColorGrid value={color} onChange={setColor} />
+          </div>
+          <div className="mt-2 flex gap-3">
+            {editing !== 'new' && editing && (
+              <BigButton
+                variant="danger"
+                onClick={() => {
+                  mutations.remove.mutate({ id: editing.id })
+                  setEditing(null)
+                }}
+              >
+                Remove
+              </BigButton>
+            )}
+            <div className="flex-1" />
+            <BigButton variant="ghost" onClick={() => setEditing(null)}>
+              Cancel
+            </BigButton>
+            <BigButton onClick={save} disabled={!name.trim() || phone.replace(/\D/g, '').length < 3}>
+              Save
+            </BigButton>
+          </div>
+        </div>
+      </Dialog>
+    </div>
+  )
+}
+
+/** Headless home server: Google can't open a browser on it, so the user pastes the result back. */
+function GooglePasteBack() {
+  const pasteBack = useGooglePasteBack()
+  const [authUrl, setAuthUrl] = useState<string | null>(null)
+  const [pasted, setPasted] = useState('')
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
+      {!authUrl ? (
+        <BigButton onClick={() => pasteBack.begin.mutate(undefined, { onSuccess: (r) => setAuthUrl(r.authUrl) })}>
+          Connect a Google account
+        </BigButton>
+      ) : (
+        <>
+          <ol className="list-decimal space-y-1 pl-5 text-base font-semibold text-ink-soft">
+            <li>
+              Open{' '}
+              <a href={authUrl} target="_blank" rel="noreferrer" className="font-extrabold text-ember-deep underline">
+                this Google sign-in link
+              </a>{' '}
+              (easiest from a laptop with this page open).
+            </li>
+            <li>Sign in and allow access. You'll land on a page that says it can't connect. That's expected.</li>
+            <li>Copy that page's whole address and paste it below.</li>
+          </ol>
+          <OskInput value={pasted} onChange={setPasted} placeholder="http://127.0.0.1:8421/?state=…&code=…" />
+          <BigButton
+            disabled={!pasted.includes('code=') || pasteBack.finish.isPending}
+            onClick={() =>
+              pasteBack.finish.mutate(
+                { url: pasted },
+                {
+                  onSuccess: () => {
+                    setAuthUrl(null)
+                    setPasted('')
+                  }
+                }
+              )
+            }
+          >
+            {pasteBack.finish.isPending ? 'Connecting…' : 'Finish connecting'}
+          </BigButton>
+        </>
+      )}
     </div>
   )
 }
@@ -245,6 +457,8 @@ function SyncStatusRow() {
 }
 
 function GoogleSection() {
+  const { data: appInfo } = useAppInfo()
+  const serverMode = appInfo?.mode === 'server'
   const { data: status } = useGoogleStatus()
   const google = useGoogleMutations()
   const [clientId, setClientId] = useState('')
@@ -257,7 +471,7 @@ function GoogleSection() {
   const saveAndConnect = (): void => {
     google.setCredentials.mutate(
       { clientId, clientSecret },
-      { onSuccess: () => google.connect.mutate(undefined) }
+      { onSuccess: () => !serverMode && google.connect.mutate(undefined) }
     )
   }
 
@@ -274,7 +488,11 @@ function GoogleSection() {
           <OskInput value={clientId} onChange={setClientId} placeholder="OAuth client ID" />
           <OskInput value={clientSecret} onChange={setClientSecret} placeholder="OAuth client secret" />
           <BigButton onClick={saveAndConnect} disabled={clientId.trim().length < 10 || clientSecret.trim().length < 5}>
-            {google.connect.isPending ? 'Waiting for browser sign-in…' : 'Save & connect Google'}
+            {google.connect.isPending
+              ? 'Waiting for browser sign-in…'
+              : serverMode
+                ? 'Save credentials'
+                : 'Save & connect Google'}
           </BigButton>
         </div>
       ) : (
@@ -331,9 +549,13 @@ function GoogleSection() {
               )}
             </div>
           ))}
-          <BigButton variant="ghost" onClick={() => google.connect.mutate(undefined)} disabled={google.connect.isPending}>
-            {google.connect.isPending ? 'Waiting for browser sign-in…' : 'Add Google account'}
-          </BigButton>
+          {serverMode ? (
+            <GooglePasteBack />
+          ) : (
+            <BigButton variant="ghost" onClick={() => google.connect.mutate(undefined)} disabled={google.connect.isPending}>
+              {google.connect.isPending ? 'Waiting for browser sign-in…' : 'Add Google account'}
+            </BigButton>
+          )}
         </div>
       )}
     </div>
@@ -362,7 +584,11 @@ function IcsSection() {
 
   return (
     <div>
-      <FieldLabel>Subscribed feeds (ICS)</FieldLabel>
+      <FieldLabel>Apple, Outlook &amp; school calendars (view-only)</FieldLabel>
+      <p className="mb-2 text-sm font-semibold text-ink-faint">
+        iCloud: Calendar app → share the calendar → Public Calendar → copy link. Outlook: Settings → Calendar →
+        Shared calendars → Publish → copy the ICS link. webcal:// links work too.
+      </p>
       <div className="flex flex-col gap-2">
         {feeds.map((c) => (
           <div key={c.id} className="flex items-center gap-3 rounded-2xl bg-paper-deep/50 p-3">
@@ -383,9 +609,9 @@ function IcsSection() {
           </div>
         ))}
         <div className="flex flex-col gap-2 rounded-2xl bg-paper-deep/50 p-3 sm:flex-row">
-          <OskInput value={url} onChange={setUrl} placeholder="https://… .ics feed URL" className="flex-[2]" />
+          <OskInput value={url} onChange={setUrl} placeholder="webcal://… or https://… calendar link" className="flex-[2]" />
           <OskInput value={name} onChange={setName} placeholder="Name" className="flex-1" />
-          <BigButton variant="ghost" onClick={add} disabled={!/^https?:\/\/.+/.test(url.trim()) || ics.add.isPending}>
+          <BigButton variant="ghost" onClick={add} disabled={!/^(https?|webcals?):\/\/.+/i.test(url.trim()) || ics.add.isPending}>
             Add
           </BigButton>
         </div>
@@ -1053,9 +1279,12 @@ function hhMmToMinutes(s: string): number {
 
 function ScreensaverSection() {
   const { data: settings } = useSettings()
+  const { data: appInfo } = useAppInfo()
   const mutation = useSettingsMutation()
+  const [folderDraft, setFolderDraft] = useState<string | null>(null)
   if (!settings) return null
   const ss = settings.screensaver
+  const serverMode = appInfo?.mode === 'server'
 
   const pickFolder = async (): Promise<void> => {
     await ipcInvoke('screensaver:pickFolder', undefined)
@@ -1069,16 +1298,42 @@ function ScreensaverSection() {
       <div className="flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
         <div className="flex items-center gap-3">
           <span className="min-w-0 flex-1 truncate text-base font-bold text-ink-soft">
-            {ss.folder ?? 'No photo folder chosen'}
+            {ss.folder ?? (settings.album.url ? 'Using the shared album above' : 'No photo folder chosen')}
           </span>
-          <button
-            type="button"
-            onClick={() => void pickFolder()}
-            className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
-          >
-            Choose folder
-          </button>
+          {serverMode ? (
+            folderDraft === null ? (
+              <button
+                type="button"
+                onClick={() => setFolderDraft(ss.folder ?? '')}
+                className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
+              >
+                Set server folder
+              </button>
+            ) : null
+          ) : (
+            <button
+              type="button"
+              onClick={() => void pickFolder()}
+              className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
+            >
+              Choose folder
+            </button>
+          )}
         </div>
+        {serverMode && folderDraft !== null && (
+          <div className="flex gap-2">
+            <OskInput value={folderDraft} onChange={setFolderDraft} placeholder="/photos (a folder on the home server)" className="flex-1" />
+            <BigButton
+              variant="ghost"
+              onClick={() => {
+                mutation.mutate({ screensaver: { ...ss, folder: folderDraft.trim() || null } })
+                setFolderDraft(null)
+              }}
+            >
+              Save
+            </BigButton>
+          </div>
+        )}
         <div className="flex items-end gap-6">
           <div>
             <FieldLabel>Starts after (minutes idle)</FieldLabel>
@@ -1092,7 +1347,6 @@ function ScreensaverSection() {
           <div className="flex-1" />
           <BigButton
             variant="ghost"
-            disabled={!ss.folder}
             onClick={() => void ipcInvoke('kiosk:previewScreensaver', undefined)}
           >
             Preview
@@ -1139,10 +1393,316 @@ function SleepSection() {
   )
 }
 
-function GeneralTab() {
+
+/** Family photos from an iCloud shared album (Public Website link). */
+function AlbumSection() {
+  const { data: settings } = useSettings()
+  const mutation = useSettingsMutation()
+  const { data: status } = useAlbumStatus()
+  const refresh = useAlbumRefresh()
+  const [url, setUrl] = useState('')
+  if (!settings) return null
+  const current = settings.album.url
+
+  return (
+    <div>
+      <FieldLabel>Family photos (iCloud shared album)</FieldLabel>
+      <div className="flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
+        {current ? (
+          <>
+            <div className="flex items-center gap-3">
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-lg font-bold">{status?.name ?? 'Shared album'}</span>
+                <span className="block text-sm font-bold text-ink-faint">
+                  {status?.syncing
+                    ? 'Downloading photos…'
+                    : status?.lastError
+                      ? status.lastError
+                      : `${status?.photoCount ?? 0} photos · updates every 30 minutes`}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => refresh.mutate(undefined)}
+                className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                onClick={() => mutation.mutate({ album: { url: null } })}
+                className="pressable rounded-full border-2 border-ember-soft px-4 py-1.5 text-sm font-bold text-ember-deep"
+              >
+                Remove
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-sm font-semibold text-ink-faint">
+              On an iPhone: Photos → Shared Albums → open the album → People icon → turn on{' '}
+              <span className="font-extrabold">Public Website</span> → Share Link. Paste the link here. New photos
+              added to the album show up on the screen automatically.
+            </p>
+            <div className="flex gap-2">
+              <OskInput value={url} onChange={setUrl} placeholder="https://www.icloud.com/sharedalbum/#B0…" className="flex-1" />
+              <BigButton
+                variant="ghost"
+                disabled={!/icloud\.com\/sharedalbum\/.*#\w+/i.test(url)}
+                onClick={() => mutation.mutate({ album: { url: url.trim() } }, { onSuccess: () => setUrl('') })}
+              >
+                Add
+              </BigButton>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Cameras tile: where it opens Google Home, and whether kids need the PIN. */
+function CamerasSection() {
   const { data: settings } = useSettings()
   const mutation = useSettingsMutation()
   if (!settings) return null
+  const cameras = settings.cameras
+  return (
+    <div>
+      <FieldLabel>Cameras (Google Home)</FieldLabel>
+      <SegmentedControl
+        value={cameras.open}
+        onChange={(open) => mutation.mutate({ cameras: { ...cameras, open } })}
+        options={[
+          { value: 'app', label: 'Google Home app' },
+          { value: 'web', label: 'Google Home website' }
+        ]}
+      />
+      <div className="mt-3">
+        <SegmentedControl
+          value={cameras.requirePin ? 'pin' : 'open'}
+          onChange={(v) => mutation.mutate({ cameras: { ...cameras, requirePin: v === 'pin' } })}
+          options={[
+            { value: 'pin', label: 'Parent PIN first' },
+            { value: 'open', label: 'Anyone can open' }
+          ]}
+        />
+      </div>
+      <div className="mt-3">
+        <SegmentedControl
+          value={cameras.live}
+          onChange={(live) => mutation.mutate({ cameras: { ...cameras, live } })}
+          options={[
+            { value: 'tap', label: 'Tap to watch live' },
+            { value: 'always', label: 'Always live' }
+          ]}
+        />
+      </div>
+      <p className="mt-2 text-sm font-semibold text-ink-faint">
+        "Open Google Home" and the camera's "More" button leave this screen. Google Home also controls locks and
+        thermostats, so they ask for the PIN by default. "Always live" suits plugged-in cameras; battery cameras last
+        longer with "Tap to watch".
+      </p>
+      <NestConnect />
+    </div>
+  )
+}
+
+/** Google Device Access sign-in, so cameras can play live on the home screen. */
+function NestConnect() {
+  const { data: status } = useNestStatus()
+  const nest = useNestMutations()
+  const [projectId, setProjectId] = useState('')
+  const [clientId, setClientId] = useState('')
+  const [clientSecret, setClientSecret] = useState('')
+  const [authUrl, setAuthUrl] = useState<string | null>(null)
+  const [pasted, setPasted] = useState('')
+  const [editing, setEditing] = useState(false)
+  if (!status) return null
+
+  if (status.connected && !editing) {
+    return (
+      <div className="mt-3 flex items-center gap-3 rounded-2xl bg-paper-deep/50 px-4 py-3">
+        <span className="h-3.5 w-3.5 rounded-full bg-[#46A758]" />
+        <span className="min-w-0 flex-1 text-base font-bold text-ink-soft">
+          {status.error ?? 'Live cameras connected. Add a "Google Home camera" tile to the home screen.'}
+        </span>
+        <button
+          type="button"
+          onClick={() => nest.disconnect.mutate(undefined)}
+          className="pressable rounded-full border-2 border-line bg-card px-4 py-1.5 text-sm font-bold text-ink-soft"
+        >
+          Disconnect
+        </button>
+      </div>
+    )
+  }
+
+  if (!status.configured || editing) {
+    return (
+      <div className="mt-3 flex flex-col gap-2 rounded-2xl bg-paper-deep/50 p-4">
+        <FieldLabel>Live cameras (Google Device Access)</FieldLabel>
+        <p className="text-sm font-semibold text-ink-faint">
+          One-time setup: see "Live cameras" in the tablet setup guide. Paste the IDs from the Device Access Console and
+          your Google Cloud "Web application" OAuth client.
+        </p>
+        <OskInput value={projectId} onChange={setProjectId} placeholder="Device Access Project ID" />
+        <OskInput value={clientId} onChange={setClientId} placeholder="OAuth client ID" />
+        <OskInput value={clientSecret} onChange={setClientSecret} placeholder="OAuth client secret" />
+        <BigButton
+          disabled={!projectId.trim() || !clientId.trim() || !clientSecret.trim() || nest.setCredentials.isPending}
+          onClick={() =>
+            nest.setCredentials.mutate(
+              { projectId, clientId, clientSecret },
+              {
+                onSuccess: () => {
+                  setEditing(false)
+                  setClientSecret('')
+                }
+              }
+            )
+          }
+        >
+          Save
+        </BigButton>
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 flex flex-col gap-3 rounded-2xl bg-paper-deep/50 p-4">
+      <FieldLabel>Live cameras (Google Device Access)</FieldLabel>
+      {!authUrl ? (
+        <div className="flex gap-2">
+          <BigButton onClick={() => nest.begin.mutate(undefined, { onSuccess: (r) => setAuthUrl(r.authUrl) })}>
+            Connect Google Home cameras
+          </BigButton>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="pressable rounded-full border-2 border-line bg-card px-4 text-sm font-bold text-ink-soft"
+          >
+            Change IDs
+          </button>
+        </div>
+      ) : (
+        <>
+          <ol className="list-decimal space-y-1 pl-5 text-base font-semibold text-ink-soft">
+            <li>
+              Open{' '}
+              <a href={authUrl} target="_blank" rel="noreferrer" className="font-extrabold text-ember-deep underline">
+                this Google sign-in link
+              </a>{' '}
+              (easiest from a laptop with this page open).
+            </li>
+            <li>Pick your home, turn on each camera you want, and allow access.</li>
+            <li>You'll land on google.com. Copy that page's whole address and paste it below.</li>
+          </ol>
+          <OskInput value={pasted} onChange={setPasted} placeholder="https://www.google.com/?state=…&code=…" />
+          <BigButton
+            disabled={!pasted.includes('code=') || nest.finish.isPending}
+            onClick={() =>
+              nest.finish.mutate(
+                { url: pasted },
+                {
+                  onSuccess: () => {
+                    setAuthUrl(null)
+                    setPasted('')
+                  }
+                }
+              )
+            }
+          >
+            {nest.finish.isPending ? 'Connecting…' : 'Finish connecting'}
+          </BigButton>
+        </>
+      )}
+    </div>
+  )
+}
+
+/** How call buttons dial out. */
+function CallingSection() {
+  const { data: settings } = useSettings()
+  const mutation = useSettingsMutation()
+  if (!settings) return null
+  return (
+    <div>
+      <FieldLabel>Calling</FieldLabel>
+      <SegmentedControl
+        value={settings.calling.method}
+        onChange={(method) => mutation.mutate({ calling: { method } })}
+        options={[
+          { value: 'googleVoice', label: 'Google Voice app' },
+          { value: 'tel', label: 'Ask the tablet' }
+        ]}
+      />
+      <p className="mt-2 text-sm font-semibold text-ink-faint">
+        "Google Voice app" opens Google Voice directly. If that doesn't work on your tablet, pick "Ask the tablet" and
+        choose Google Voice → Always the first time.
+      </p>
+    </div>
+  )
+}
+
+/** Server mode: pair another wall screen with a 6-digit code. */
+function ScreensSection() {
+  const issue = useIssuePairCode()
+  const [code, setCode] = useState<{ code: string; expiresAt: string } | null>(null)
+  return (
+    <div>
+      <FieldLabel>Screens</FieldLabel>
+      <div className="flex items-center gap-4 rounded-2xl bg-paper-deep/50 p-4">
+        {code ? (
+          <span className="flex-1">
+            <span className="block font-display text-4xl font-semibold tracking-[0.3em]">{code.code}</span>
+            <span className="block text-sm font-bold text-ink-faint">
+              Type this on the new screen. Works once, for 15 minutes.
+            </span>
+          </span>
+        ) : (
+          <span className="flex-1 text-base font-semibold text-ink-soft">
+            Connect another tablet or browser to this home server.
+          </span>
+        )}
+        <BigButton variant="ghost" onClick={() => issue.mutate(undefined, { onSuccess: setCode })}>
+          {code ? 'New code' : 'Pair a screen'}
+        </BigButton>
+      </div>
+    </div>
+  )
+}
+
+/** Built-in keyboard vs the tablet's own. */
+function KeyboardSection() {
+  const { data: settings } = useSettings()
+  const mutation = useSettingsMutation()
+  if (!settings) return null
+  return (
+    <div>
+      <FieldLabel>On-screen keyboard</FieldLabel>
+      <SegmentedControl
+        value={settings.onScreenKeyboard}
+        onChange={(onScreenKeyboard) => mutation.mutate({ onScreenKeyboard })}
+        options={[
+          { value: 'auto', label: 'Automatic' },
+          { value: 'on', label: 'Built-in' },
+          { value: 'off', label: "Device's own" }
+        ]}
+      />
+      <p className="mt-2 text-sm font-semibold text-ink-faint">
+        Automatic uses the built-in keyboard on a Windows touchscreen and the tablet's own keyboard in a browser.
+      </p>
+    </div>
+  )
+}
+
+function GeneralTab() {
+  const { data: settings } = useSettings()
+  const { data: appInfo } = useAppInfo()
+  const mutation = useSettingsMutation()
+  if (!settings) return null
+  const serverMode = appInfo?.mode === 'server'
   return (
     <div className="flex max-w-xl flex-col gap-6">
       <div>
@@ -1165,10 +1725,15 @@ function GeneralTab() {
         )}
       </div>
       <WeatherSection />
+      <AlbumSection />
       <ScreensaverSection />
       <SleepSection />
       <ParentalLockSection />
+      <CallingSection />
+      <CamerasSection />
+      {serverMode && <ScreensSection />}
       <CompanionSection />
+      <KeyboardSection />
       <div>
         <FieldLabel>Default screen</FieldLabel>
         <SegmentedControl
@@ -1202,6 +1767,7 @@ function GeneralTab() {
           ]}
         />
       </div>
+      {!serverMode && (
       <div className="flex items-center gap-3 rounded-2xl bg-paper-deep/50 p-4">
         <span className="flex-1 text-base font-semibold text-ink-soft">
           Launch OpenSkyLight when the computer starts (installed app only)
@@ -1212,6 +1778,7 @@ function GeneralTab() {
           label="Launch on startup"
         />
       </div>
+      )}
     </div>
   )
 }

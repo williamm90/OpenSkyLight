@@ -2,6 +2,15 @@
 
 An open-source, fully standalone family calendar display — a [Skylight Calendar](https://myskylight.com) alternative with no subscription, no cloud account, and no Home Assistant. One Electron app owns the whole touchscreen: calendar, family member color coding, Google sync, weather, chores, rewards, lists, meals, news, live cameras, and a photo screensaver.
 
+## Wall tablet mode (this fork)
+
+Run OpenSkyLight on a **large Android tablet** instead of a Windows PC: a small
+always-on home server (`npm run server` or `docker compose up -d`) does the
+work, and the tablet shows it in Fully Kiosk Browser. This fork also adds
+**photo avatars**, **sticker cards** for kids, **one-tap Google Voice calling**
+to grandparents, **iCloud shared album** photos, and `webcal://` support for
+Apple/Outlook calendars. See **[docs/TABLET-SETUP.md](docs/TABLET-SETUP.md)**.
+
 ## What it looks like
 
 The customizable home screen — a big clock and a 3-day weather glance in the

@@ -1,10 +1,43 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
 import { useQuery } from '@tanstack/react-query'
 import { ipcInvoke } from '../../api/client'
 import { useSettings } from '../../api/hooks'
 import { ZONE } from '../../stores/uiStore'
 import { useKioskState } from '../../stores/kioskStore'
+import { isWebMode } from '../../api/webBridge'
+
+const IDLE_CHECK_MS = 5_000
+
+/**
+ * Browser displays track their own touch idleness (the home server can't see
+ * the tablet's input). Electron gets the same signal from powerMonitor.
+ */
+function useClientIdleScreensaver(onIdle: () => void): void {
+  const { data: settings } = useSettings()
+  const idleMinutes = settings?.screensaver.idleMinutes ?? 10
+  const lastActivity = useRef(Date.now())
+  const fired = useRef(false)
+  useEffect(() => {
+    if (!isWebMode()) return
+    const bump = (): void => {
+      lastActivity.current = Date.now()
+      fired.current = false
+    }
+    const events = ['pointerdown', 'keydown', 'wheel'] as const
+    for (const e of events) window.addEventListener(e, bump, { passive: true, capture: true })
+    const timer = window.setInterval(() => {
+      if (!fired.current && Date.now() - lastActivity.current >= idleMinutes * 60_000) {
+        fired.current = true
+        onIdle()
+      }
+    }, IDLE_CHECK_MS)
+    return () => {
+      for (const e of events) window.removeEventListener(e, bump, { capture: true })
+      window.clearInterval(timer)
+    }
+  }, [idleMinutes, onIdle])
+}
 
 const WAKE_OVERRIDE_MS = 5 * 60 * 1000
 const SLIDE_MS = 12_000
@@ -79,6 +112,16 @@ export function KioskOverlays() {
   const [awakeOverride, setAwakeOverride] = useState(false)
   const overrideTimer = useRef<number | null>(null)
   const setCovered = useKioskState((s) => s.setCovered)
+  const { data: idlePhotos = [] } = useQuery({
+    queryKey: ['screensaverPhotos'],
+    queryFn: () => ipcInvoke('screensaver:listPhotos', undefined),
+    staleTime: 60_000
+  })
+  const hasPhotos = idlePhotos.length > 0
+  const startScreensaver = useCallback(() => {
+    if (hasPhotos) setScreensaver(true)
+  }, [hasPhotos])
+  useClientIdleScreensaver(startScreensaver)
 
   // let expensive tiles (camera streams) pause while a layer covers them
   const covered = (sleeping && !awakeOverride) || screensaver

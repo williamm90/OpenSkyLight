@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { app, safeStorage } from 'electron'
+import type { IncomingMessage } from 'node:http'
 import { WebSocketServer, WebSocket } from 'ws'
 import ffmpegStatic from 'ffmpeg-static'
 import { uuidv7 } from '@shared/uuid'
@@ -8,6 +8,7 @@ import type { CameraDto } from '@shared/types'
 import type { SettingsService } from './settingsService'
 import { AppError, invalid, notFound } from './errors'
 import { buildFfmpegArgs, isValidRtspUrl } from './cameraArgs'
+import type { SecretBox } from '../secretBox'
 
 const KEY_CAMERAS = 'cameras.v1'
 const MAX_CLIENT_BUFFER = 8 * 1024 * 1024 // drop clients that fall this far behind
@@ -28,24 +29,23 @@ const NO_CLIENTS_GRACE_MS = 30_000
  * for 30s is killed regardless of session bookkeeping.
  */
 
-export function resolveFfmpegPath(): string | null {
+/** FFMPEG_PATH wins (Docker installs a system ffmpeg); else the bundled static binary. */
+export function resolveFfmpegPath(isPackaged = false): string | null {
+  if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH
   const p = ffmpegStatic as unknown as string | null
   if (!p) return null
-  return app.isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
+  return isPackaged ? p.replace('app.asar', 'app.asar.unpacked') : p
 }
 
-function encryptUrl(plain: string): string {
-  const buf = safeStorage.isEncryptionAvailable()
-    ? safeStorage.encryptString(plain)
-    : Buffer.from(`plain:${plain}`, 'utf8')
-  return buf.toString('base64')
-}
-
-function decryptUrl(b64: string): string {
-  const buf = Buffer.from(b64, 'base64')
-  const asString = buf.toString('utf8')
-  if (asString.startsWith('plain:')) return asString.slice(6)
-  return safeStorage.decryptString(buf)
+export interface CameraServiceDeps {
+  secrets: SecretBox
+  isPackaged?: boolean
+  /**
+   * 'standalone' (desktop): a private WebSocket server on 127.0.0.1.
+   * 'attached' (headless server): sockets arrive through the main HTTP
+   * server's upgrade handler and the URL is a same-origin path.
+   */
+  wsMode?: 'standalone' | 'attached'
 }
 
 interface StoredCamera {
@@ -63,7 +63,10 @@ interface ActiveStream {
   graceTimer: NodeJS.Timeout | null
 }
 
-export function createCameraService(settings: SettingsService) {
+export function createCameraService(settings: SettingsService, deps: CameraServiceDeps) {
+  const wsMode = deps.wsMode ?? 'standalone'
+  const encryptUrl = (plain: string): string => deps.secrets.encrypt(plain).toString('base64')
+  const decryptUrl = (b64: string): string => deps.secrets.decrypt(Buffer.from(b64, 'base64'))
   const streams = new Map<string, ActiveStream>()
   const sessions = new Map<string, ActiveStream>()
   const token = randomBytes(16).toString('hex')
@@ -132,23 +135,26 @@ export function createCameraService(settings: SettingsService) {
           wssPort = null
         }
       })
-      server.on('connection', (ws, req) => {
-        const url = new URL(req.url ?? '/', 'ws://127.0.0.1')
-        const cameraId = url.pathname.replace(/^\//, '')
-        const stream = streams.get(cameraId)
-        if (url.searchParams.get('token') !== token || !stream) {
-          ws.close(4001, 'unauthorized')
-          return
-        }
-        stream.clients.add(ws)
-        clearGrace(stream)
-        ws.on('close', () => {
-          stream.clients.delete(ws)
-          if (stream.clients.size === 0) armGrace(stream)
-        })
-      })
+      server.on('connection', (ws, req) => acceptClient(ws, req))
     })
     return wssPort
+  }
+
+  /** Attach a viewer socket. The path's last segment is the camera id. */
+  function acceptClient(ws: WebSocket, req: IncomingMessage): void {
+    const url = new URL(req.url ?? '/', 'ws://127.0.0.1')
+    const cameraId = url.pathname.split('/').filter(Boolean).pop() ?? ''
+    const stream = streams.get(cameraId)
+    if (url.searchParams.get('token') !== token || !stream) {
+      ws.close(4001, 'unauthorized')
+      return
+    }
+    stream.clients.add(ws)
+    clearGrace(stream)
+    ws.on('close', () => {
+      stream.clients.delete(ws)
+      if (stream.clients.size === 0) armGrace(stream)
+    })
   }
 
   function clearGrace(stream: ActiveStream): void {
@@ -187,7 +193,7 @@ export function createCameraService(settings: SettingsService) {
   }
 
   function spawnStream(cameraId: string, rtspUrl: string): ActiveStream {
-    const ffmpeg = resolveFfmpegPath()
+    const ffmpeg = resolveFfmpegPath(deps.isPackaged)
     if (!ffmpeg) throw new AppError('FFMPEG_MISSING', 'ffmpeg binary not found — reinstall the app')
     const proc = spawn(ffmpeg, buildFfmpegArgs(rtspUrl), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
     const stream: ActiveStream = { cameraId, proc, clients: new Set(), sessions: new Set(), stderrTail: '', graceTimer: null }
@@ -225,7 +231,7 @@ export function createCameraService(settings: SettingsService) {
   async function start(cameraId: string): Promise<{ wsUrl: string; sessionId: string }> {
     const camera = loadCameras().find((c) => c.id === cameraId)
     if (!camera) throw notFound('Camera')
-    const port = await ensureServer()
+    const port = wsMode === 'standalone' ? await ensureServer() : 0
     let stream = streams.get(cameraId)
     if (!stream) {
       stream = spawnStream(cameraId, decryptUrl(camera.urlEnc))
@@ -233,7 +239,12 @@ export function createCameraService(settings: SettingsService) {
     const sessionId = uuidv7()
     stream.sessions.add(sessionId)
     sessions.set(sessionId, stream)
-    return { wsUrl: `ws://127.0.0.1:${port}/${cameraId}?token=${token}`, sessionId }
+    // attached mode returns a same-origin path; the tile resolves it against location
+    const wsUrl =
+      wsMode === 'standalone'
+        ? `ws://127.0.0.1:${port}/${cameraId}?token=${token}`
+        : `/ws/camera/${cameraId}?token=${token}`
+    return { wsUrl, sessionId }
   }
 
   function stop(sessionId: string): void {
@@ -250,7 +261,7 @@ export function createCameraService(settings: SettingsService) {
     wss?.close()
   }
 
-  return { list, add, remove, start, stop, shutdown }
+  return { list, add, remove, start, stop, shutdown, acceptClient }
 }
 
 export type CameraService = ReturnType<typeof createCameraService>

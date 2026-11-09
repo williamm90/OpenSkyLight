@@ -1,7 +1,7 @@
 {
   "name": "openskylight",
   "version": "0.8.0",
-  "description": "OpenSkyLight — an open-source standalone family calendar display (Skylight Calendar clone)",
+  "description": "OpenSkyLight \u2014 an open-source standalone family calendar display (Skylight Calendar clone)",
   "main": "./out/main/index.js",
   "author": "Tyler",
   "license": "MIT",
@@ -10,7 +10,7 @@
     "dev": "electron-vite dev",
     "dev:windowed": "electron-vite dev -- --windowed",
     "dev:companion": "vite --config companion.vite.config.ts",
-    "build": "electron-vite build && npm run build:companion",
+    "build": "electron-vite build && npm run build:companion && npm run build:server",
     "build:companion": "vite build --config companion.vite.config.ts",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
@@ -18,7 +18,10 @@
     "test:watch": "node scripts/run-vitest.mjs",
     "postinstall": "electron-builder install-app-deps",
     "dist": "npm run build && electron-builder",
-    "release": "npm run build && electron-builder --publish always"
+    "release": "npm run build && electron-builder --publish always",
+    "build:server": "vite build --config server.vite.config.ts",
+    "server": "npm run build && node scripts/run-server.mjs",
+    "server:start": "node scripts/run-server.mjs"
   },
   "dependencies": {
     "@googleapis/calendar": "^15.0.0",

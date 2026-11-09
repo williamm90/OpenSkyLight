@@ -22,7 +22,11 @@ const ALLOWED_INVOKE_PREFIXES = [
   'rss:',
   'camera:',
   'companion:',
-  'birdnet:'
+  'birdnet:',
+  'contacts:',
+  'album:',
+  'nest:',
+  'display:'
 ]
 const PUSH_PREFIX = 'push:'
 

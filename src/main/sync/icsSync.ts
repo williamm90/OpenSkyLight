@@ -5,6 +5,7 @@ import { calendars, events } from '../db/schema'
 import { parseIcsFeed, type IcsMappedEvent } from './icsMap'
 import { uuidv7 } from '@shared/uuid'
 import { isoUtc } from '@shared/dates'
+import { normalizeFeedUrl } from '@shared/feedUrl'
 
 type CalendarRow = typeof calendars.$inferSelect
 
@@ -17,7 +18,7 @@ export function createIcsSync(deps: { db: AppDb; deviceTz: () => string }) {
       .values({
         id,
         provider: 'ics',
-        icsUrl: input.url,
+        icsUrl: normalizeFeedUrl(input.url),
         name: input.name,
         color: input.color,
         readOnly: true,
@@ -35,7 +36,7 @@ export function createIcsSync(deps: { db: AppDb; deviceTz: () => string }) {
     if (cal.icsEtag) headers['If-None-Match'] = cal.icsEtag
     if (cal.icsLastModified) headers['If-Modified-Since'] = cal.icsLastModified
 
-    const res = await fetch(cal.icsUrl, { headers })
+    const res = await fetch(normalizeFeedUrl(cal.icsUrl), { headers })
     if (res.status === 304) {
       db.update(calendars).set({ lastSyncedAt: isoUtc(DateTime.utc()), syncError: null }).where(eq(calendars.id, cal.id)).run()
       return false

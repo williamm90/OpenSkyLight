@@ -23,9 +23,12 @@ import { startAlarm, stopAlarm } from '../../lib/alarm'
 import { weatherIcon } from '../weather/WeatherHeader'
 import { SLOT_META } from '../meals/Meals'
 import { ZONE } from '../../stores/uiStore'
-import { formatTime, initials, textOn } from '../../lib/format'
+import { formatTime } from '../../lib/format'
 import { occurrenceColor } from '../../lib/colors'
 import { CheckIcon } from '../../components/icons'
+import { CallGrid } from '../calling/CallFamily'
+import { Avatar } from '../../components/Avatar'
+import { StickerCards } from '../stickers/StickerCard'
 
 export interface TileProps {
   tile: HomeTile
@@ -177,12 +180,7 @@ export function ChoresProgressTile({ compact }: TileProps) {
             const pct = mine.length === 0 ? 0 : Math.round((done / mine.length) * 100)
             return (
               <div key={p.id} className="flex items-center gap-2">
-                <span
-                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold"
-                  style={{ backgroundColor: p.color, color: textOn(p.color) }}
-                >
-                  {initials(p.name)}
-                </span>
+                <Avatar name={p.name} color={p.color} photo={p.photo} size={28} ring={false} />
                 <span className="min-w-0 flex-1">
                   {!compact && <span className="block truncate text-xs font-bold">{p.name}</span>}
                   <span className="block h-2.5 overflow-hidden rounded-full bg-paper-deep">
@@ -218,12 +216,7 @@ export function StarBalancesTile({ compact }: TileProps) {
         <div className="flex min-h-0 flex-1 flex-col justify-center gap-1.5 overflow-hidden">
           {shown.map((p) => (
             <div key={p.id} className="flex items-center gap-2">
-              <span
-                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-extrabold"
-                style={{ backgroundColor: p.color, color: textOn(p.color) }}
-              >
-                {initials(p.name)}
-              </span>
+              <Avatar name={p.name} color={p.color} photo={p.photo} size={28} ring={false} />
               {!compact && <span className="min-w-0 flex-1 truncate text-sm font-bold">{p.name}</span>}
               <span className={`font-extrabold text-ember-deep ${compact ? 'ml-auto text-sm' : 'text-base'}`}>
                 ★ {balances.find((b) => b.personId === p.id)?.balance ?? 0}
@@ -555,7 +548,7 @@ export function CameraTile({ tile }: TileProps) {
         }
         sessionId = res.sessionId
         player = mpegts.createPlayer(
-          { type: 'mpegts', isLive: true, url: res.wsUrl },
+          { type: 'mpegts', isLive: true, url: absoluteWsUrl(res.wsUrl) },
           { enableStashBuffer: false, liveBufferLatencyChasing: true, autoCleanupSourceBuffer: true }
         )
         player.attachMediaElement(video)
@@ -619,3 +612,35 @@ export function PhotoTile({ tile }: TileProps) {
     </div>
   )
 }
+
+/** The home server returns same-origin paths; mpegts.js needs a full ws(s):// URL. */
+function absoluteWsUrl(url: string): string {
+  if (!url.startsWith('/')) return url
+  const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  return `${scheme}//${window.location.host}${url}`
+}
+
+export function CallFamilyTile({ compact }: TileProps) {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <TileTitle>Call family</TileTitle>
+      <div className="min-h-0 flex-1">
+        <CallGrid compact={compact} />
+      </div>
+    </div>
+  )
+}
+
+export function StickersTile() {
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <TileTitle>Sticker cards</TileTitle>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <StickerCards size="small" />
+      </div>
+    </div>
+  )
+}
+
+
+export { GoogleHomeTile, NestCameraTile } from '../cameras/CameraTiles'

@@ -6,6 +6,11 @@ import type {
   ChoreCreateInput,
   ChoreDto,
   ChoreUpdateInput,
+  ContactCreateInput,
+  ContactDto,
+  NestCameraDto,
+  NestStatusDto,
+  ContactUpdateInput,
   DayChoreDto,
   EventCreateInput,
   EventDeleteInput,
@@ -31,7 +36,7 @@ import type {
  * channel and the renderer gets a fully typed `ipcInvoke`.
  */
 export type IpcContract = {
-  'app:getInfo': { req: void; res: { version: string; platform: string; zone: string } }
+  'app:getInfo': { req: void; res: { version: string; mode: 'desktop' | 'server'; platform: string; zone: string } }
   'app:installUpdate': { req: void; res: void }
 
   'settings:getAll': { req: void; res: AppSettings }
@@ -41,6 +46,40 @@ export type IpcContract = {
   'people:create': { req: PersonCreateInput; res: PersonDto }
   'people:update': { req: PersonUpdateInput; res: PersonDto }
   'people:delete': { req: { id: string }; res: void }
+
+  'contacts:list': { req: void; res: ContactDto[] }
+  'contacts:create': { req: ContactCreateInput; res: ContactDto }
+  'contacts:update': { req: ContactUpdateInput; res: ContactDto }
+  'contacts:delete': { req: { id: string }; res: void }
+
+  'album:getStatus': {
+    req: void
+    res: {
+      configured: boolean
+      name: string | null
+      photoCount: number
+      lastSyncedAt: string | null
+      lastError: string | null
+      syncing: boolean
+    }
+  }
+  'album:refresh': { req: void; res: void }
+
+  'nest:getStatus': { req: void; res: NestStatusDto }
+  'nest:setCredentials': { req: { projectId: string; clientId: string; clientSecret: string }; res: void }
+  'nest:beginConnect': { req: void; res: { authUrl: string } }
+  'nest:finishConnect': { req: { url: string }; res: { cameras: number } }
+  'nest:disconnect': { req: void; res: void }
+  'nest:listCameras': { req: void; res: NestCameraDto[] }
+  'nest:startStream': {
+    req: { deviceId: string; offerSdp: string }
+    res: { answerSdp: string; mediaSessionId: string; expiresAt: string }
+  }
+  'nest:extendStream': { req: { deviceId: string; mediaSessionId: string }; res: { mediaSessionId: string; expiresAt: string } }
+  'nest:stopStream': { req: { deviceId: string; mediaSessionId: string }; res: void }
+
+  /** Server mode: mint a 6-digit code another screen can pair with (parent-gated). */
+  'display:issuePairCode': { req: void; res: { code: string; expiresAt: string } }
 
   'calendars:list': { req: void; res: CalendarDto[] }
   'calendars:create': { req: CalendarCreateInput; res: CalendarDto }
@@ -59,6 +98,9 @@ export type IpcContract = {
   }
   'google:setCredentials': { req: { clientId: string; clientSecret: string }; res: void }
   'google:connect': { req: void; res: { email: string } }
+  /** Headless sign-in: get a consent link whose redirect is pasted back below. */
+  'google:beginPasteBack': { req: void; res: { authUrl: string } }
+  'google:finishPasteBack': { req: { url: string }; res: { email: string } }
   'google:disconnect': { req: { accountId: string }; res: void }
   'google:listRemoteCalendars': {
     req: { accountId: string }
@@ -220,7 +262,11 @@ export const ALLOWED_CHANNEL_PREFIXES = [
   'rss:',
   'camera:',
   'companion:',
-  'birdnet:'
+  'birdnet:',
+  'contacts:',
+  'album:',
+  'display:',
+  'nest:'
 ] as const
 
 /** Envelope used for every invoke result so errors cross the bridge cleanly. */

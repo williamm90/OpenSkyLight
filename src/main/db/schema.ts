@@ -8,6 +8,10 @@ export const people = sqliteTable('people', {
   color: text('color').notNull(),
   role: text('role', { enum: ['parent', 'child'] }).notNull().default('child'),
   avatarPath: text('avatar_path'),
+  /** small JPEG data URL (resized on the display before upload) */
+  photo: text('photo'),
+  /** the reward this child's sticker card is working toward */
+  goalRewardId: text('goal_reward_id'),
   sortOrder: integer('sort_order').notNull().default(0),
   createdAt: text('created_at').notNull(),
   deletedAt: text('deleted_at')
@@ -198,4 +202,16 @@ export const mealSlots = sqliteTable(
 export const settings = sqliteTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull() // JSON
+})
+
+/** People the kids can call with one tap (grandparents, parents' cells…). */
+export const contacts = sqliteTable('contacts', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  phone: text('phone').notNull(),
+  photo: text('photo'),
+  color: text('color').notNull().default('#0091FF'),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  deletedAt: text('deleted_at')
 })

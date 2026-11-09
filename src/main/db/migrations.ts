@@ -193,6 +193,22 @@ const MIGRATIONS: string[] = [
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
   );
+  `,
+  // 002 — family hub: photo avatars, sticker-card goals, one-tap call contacts
+  `
+  ALTER TABLE people ADD COLUMN photo TEXT;
+  ALTER TABLE people ADD COLUMN goal_reward_id TEXT REFERENCES rewards(id);
+
+  CREATE TABLE contacts (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    phone TEXT NOT NULL,
+    photo TEXT,
+    color TEXT NOT NULL DEFAULT '#0091FF',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    deleted_at TEXT
+  );
   `
 ]
 

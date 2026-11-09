@@ -33,17 +33,21 @@ export const TILE_SPECS: Record<HomeTileType, TileSpec> = {
   news: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['feedId'] },
   camera: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['cameraId'] },
   birdnet: { minW: 3, minH: 2, defaultW: 4, defaultH: 4, allowMultiple: true, configKeys: ['birdnetUrl'] },
-  timer: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: false, configKeys: [] }
+  timer: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: false, configKeys: [] },
+  callFamily: { minW: 2, minH: 2, defaultW: 3, defaultH: 3, allowMultiple: false, configKeys: [] },
+  stickers: { minW: 3, minH: 2, defaultW: 5, defaultH: 3, allowMultiple: false, configKeys: [] },
+  googleHome: { minW: 2, minH: 2, defaultW: 3, defaultH: 2, allowMultiple: false, configKeys: [] },
+  nestCamera: { minW: 3, minH: 2, defaultW: 4, defaultH: 3, allowMultiple: true, configKeys: ['nestDeviceId'] }
 }
 
 /** Tiles the full 12x6 grid with no gaps. Clock/weather tiles are NOT placed by
  * default — the header already shows both — but stay in the Add Tile sheet. */
 export const DEFAULT_HOME_LAYOUT: HomeTile[] = [
   { id: 'default-todayEvents', type: 'todayEvents', x: 0, y: 0, w: 4, h: 6 },
-  { id: 'default-weekAgenda', type: 'weekAgenda', x: 4, y: 0, w: 5, h: 6 },
-  { id: 'default-meals', type: 'meals', x: 9, y: 0, w: 3, h: 2 },
-  { id: 'default-choresProgress', type: 'choresProgress', x: 9, y: 2, w: 3, h: 2 },
-  { id: 'default-starBalances', type: 'starBalances', x: 9, y: 4, w: 3, h: 2 }
+  { id: 'default-weekAgenda', type: 'weekAgenda', x: 4, y: 0, w: 5, h: 3 },
+  { id: 'default-stickers', type: 'stickers', x: 4, y: 3, w: 5, h: 3 },
+  { id: 'default-callFamily', type: 'callFamily', x: 9, y: 0, w: 3, h: 3 },
+  { id: 'default-choresProgress', type: 'choresProgress', x: 9, y: 3, w: 3, h: 3 }
 ]
 
 export interface Rect {

@@ -2,6 +2,10 @@ import type { ComponentType } from 'react'
 import type { CalendarViewKind, HomeTileType } from '@shared/types'
 import {
   BirdNetTile,
+  CallFamilyTile,
+  StickersTile,
+  GoogleHomeTile,
+  NestCameraTile,
   CameraTile,
   TimerTile,
   ChoresProgressTile,
@@ -96,5 +100,26 @@ export const TILE_REGISTRY: Record<HomeTileType, TileMeta> = {
     label: 'Timers',
     description: 'Countdown timers — set by tap or voice',
     component: TimerTile
+  },
+  callFamily: {
+    label: 'Call family',
+    description: 'One-tap photo buttons to call grandparents, mom and dad',
+    component: CallFamilyTile
+  },
+  stickers: {
+    label: 'Sticker cards',
+    description: "Each kid's sticker card toward their goal",
+    component: StickersTile,
+    navTarget: 'chores'
+  },
+  googleHome: {
+    label: 'Open Google Home',
+    description: 'Opens your Google Home cameras (app or website)',
+    component: GoogleHomeTile
+  },
+  nestCamera: {
+    label: 'Google Home camera',
+    description: 'Live view from one of your Google Home / Nest cameras',
+    component: NestCameraTile
   }
 }

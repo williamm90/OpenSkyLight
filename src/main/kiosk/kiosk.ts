@@ -10,7 +10,11 @@ const PHOTO_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bm
 const IDLE_POLL_MS = 5_000
 const SLEEP_POLL_MS = 5_000
 
-export function createKiosk(deps: { settings: SettingsService; broadcast: (ch: string, p: unknown) => void }) {
+export function createKiosk(deps: {
+  settings: SettingsService
+  broadcast: (ch: string, p: unknown) => void
+  albumCacheDir: string
+}) {
   const { settings, broadcast } = deps
   let idleTimer: NodeJS.Timeout | null = null
   let sleepTimer: NodeJS.Timeout | null = null
@@ -28,6 +32,18 @@ export function createKiosk(deps: { settings: SettingsService; broadcast: (ch: s
       const full = resolve(join(folder, name))
       // path-traversal guard: the resolved file must stay inside the folder
       if (!full.startsWith(resolve(folder))) return new Response('forbidden', { status: 403 })
+      return net.fetch(pathToFileURL(full).toString())
+    })
+  }
+
+  /** Cached shared-album photos, served the same sandbox-safe way. */
+  function registerAlbumProtocol(): void {
+    protocol.handle('osl-album', (request) => {
+      const url = new URL(request.url)
+      const name = decodeURIComponent(url.pathname.replace(/^\//, ''))
+      const root = resolve(deps.albumCacheDir)
+      const full = resolve(join(root, name))
+      if (!full.startsWith(root)) return new Response('forbidden', { status: 403 })
       return net.fetch(pathToFileURL(full).toString())
     })
   }
@@ -97,6 +113,7 @@ export function createKiosk(deps: { settings: SettingsService; broadcast: (ch: s
 
   function start(): void {
     registerPhotoProtocol()
+    registerAlbumProtocol()
     registerBirdImageProtocol()
     blockerId = powerSaveBlocker.start('prevent-display-sleep')
 

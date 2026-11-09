@@ -1,14 +1,31 @@
 import { z } from 'zod'
+import { normalizeFeedUrl } from '../feedUrl'
 
 const isoInstant = z.string().refine((s) => !Number.isNaN(Date.parse(s)), 'invalid ISO datetime')
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'invalid ISO date')
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'invalid color')
 const id = z.string().min(1)
 
+/** Small avatar image, resized on the display before upload (~256px JPEG ≈ 20–40 KB). */
+export const PHOTO_MAX_CHARS = 400_000
+const photo = z
+  .string()
+  .max(PHOTO_MAX_CHARS, 'Photo is too large')
+  .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'Photo must be a JPEG, PNG or WebP image')
+  .nullable()
+
+/** Digits with optional leading +, spaces/dashes/parens/dots allowed while typing. */
+const phone = z
+  .string()
+  .trim()
+  .max(30)
+  .regex(/^\+?[0-9 ()\-.]{3,}$/, 'Enter a phone number like +1 555 123 4567')
+
 export const personCreateSchema = z.object({
   name: z.string().trim().min(1).max(60),
   color: hexColor,
-  role: z.enum(['parent', 'child'])
+  role: z.enum(['parent', 'child']),
+  photo: photo.optional()
 })
 
 export const personUpdateSchema = z.object({
@@ -16,8 +33,28 @@ export const personUpdateSchema = z.object({
   name: z.string().trim().min(1).max(60).optional(),
   color: hexColor.optional(),
   role: z.enum(['parent', 'child']).optional(),
+  sortOrder: z.number().int().optional(),
+  photo: photo.optional(),
+  goalRewardId: id.nullable().optional()
+})
+
+export const contactCreateSchema = z.object({
+  name: z.string().trim().min(1).max(40),
+  phone,
+  photo: photo.optional(),
+  color: hexColor
+})
+
+export const contactUpdateSchema = z.object({
+  id,
+  name: z.string().trim().min(1).max(40).optional(),
+  phone: phone.optional(),
+  photo: photo.optional(),
+  color: hexColor.optional(),
   sortOrder: z.number().int().optional()
 })
+
+export const pasteBackSchema = z.object({ url: z.string().trim().min(10).max(4000) })
 
 export const calendarCreateSchema = z.object({
   name: z.string().trim().min(1).max(80),
@@ -97,7 +134,11 @@ const homeTileSchema = z.object({
     'news',
     'camera',
     'birdnet',
-    'timer'
+    'timer',
+    'callFamily',
+    'stickers',
+    'googleHome',
+    'nestCamera'
   ]),
   x: z.number().int().min(0).max(11),
   y: z.number().int().min(0).max(5),
@@ -110,7 +151,8 @@ const homeTileSchema = z.object({
       listId: z.string().min(1).max(200).optional(),
       feedId: z.string().min(1).max(200).optional(),
       cameraId: z.string().min(1).max(200).optional(),
-      birdnetUrl: z.string().min(1).max(200).optional()
+      birdnetUrl: z.string().min(1).max(200).optional(),
+      nestDeviceId: z.string().min(1).max(200).optional()
     })
     .optional()
 })
@@ -150,7 +192,22 @@ export const settingsPatchSchema = z.object({
       sleep: z.object({ enabled: z.boolean(), start: z.string(), end: z.string() }).optional(),
       screensaver: z.object({ folder: z.string().nullable(), idleMinutes: z.number().int().min(1).max(120) }).optional(),
       launchOnStartup: z.boolean().optional(),
-      companion: z.object({ enabled: z.boolean(), port: z.number().int().min(1024).max(65535) }).optional()
+      companion: z.object({ enabled: z.boolean(), port: z.number().int().min(1024).max(65535) }).optional(),
+      album: z
+        .object({
+          url: z
+            .string()
+            .trim()
+            .max(300)
+            .regex(/^https:\/\/(www\.)?icloud\.com\/sharedalbum\/.*#[A-Za-z0-9]+/, 'Paste the album’s icloud.com/sharedalbum link')
+            .nullable()
+        })
+        .optional(),
+      calling: z.object({ method: z.enum(['tel', 'googleVoice']) }).optional(),
+      cameras: z
+        .object({ open: z.enum(['app', 'web']), requirePin: z.boolean(), live: z.enum(['tap', 'always']) })
+        .optional(),
+      onScreenKeyboard: z.enum(['auto', 'on', 'off']).optional()
     })
     .strict()
 })
@@ -175,7 +232,13 @@ export const googleCalendarSelectSchema = z.object({
 })
 
 export const icsAddSchema = z.object({
-  url: z.string().trim().url().max(2000),
+  // webcal:// links (Apple, Outlook) are rewritten to https:// before validation
+  url: z
+    .string()
+    .trim()
+    .max(2000)
+    .transform(normalizeFeedUrl)
+    .pipe(z.string().url().regex(/^https?:\/\//i, 'Calendar links must start with https:// or webcal://')),
   name: z.string().trim().min(1).max(80),
   color: hexColor
 })
@@ -247,3 +310,18 @@ export const citySearchSchema = z.object({ query: z.string().trim().min(2).max(8
 export const pinVerifySchema = z.object({ pin: z.string().regex(/^\d{4,8}$/) })
 
 export const pinSetSchema = z.object({ pin: z.string().regex(/^\d{4,8}$/).nullable() })
+
+const nestDeviceId = z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'Unknown camera')
+export const nestCredentialsSchema = z.object({
+  projectId: z.string().trim().regex(/^[A-Za-z0-9-]{8,64}$/, 'Paste the Project ID from the Device Access Console'),
+  clientId: z.string().trim().min(10).max(300),
+  clientSecret: z.string().trim().min(5).max(300)
+})
+export const nestStartSchema = z.object({
+  deviceId: nestDeviceId,
+  offerSdp: z.string().min(20).max(20000).startsWith('v=0')
+})
+export const nestSessionSchema = z.object({
+  deviceId: nestDeviceId,
+  mediaSessionId: z.string().min(1).max(1000)
+})

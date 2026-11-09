@@ -13,7 +13,7 @@ import { XIcon } from '../../components/icons'
 import { TILE_REGISTRY } from './tileRegistry'
 
 const TILE_TYPES = Object.keys(TILE_REGISTRY) as HomeTileType[]
-type PickerStep = null | 'list' | 'news' | 'camera' | 'birdnet'
+type PickerStep = null | 'list' | 'news' | 'camera' | 'birdnet' | 'nestCamera'
 
 export function AddTileSheet({
   open,
@@ -57,7 +57,7 @@ export function AddTileSheet({
       ? 'Which list?'
       : picker === 'news'
         ? 'Which news feed?'
-        : picker === 'camera'
+        : picker === 'camera' || picker === 'nestCamera'
           ? 'Which camera?'
           : picker === 'birdnet'
             ? 'BirdNET-Go address'
@@ -91,6 +91,8 @@ export function AddTileSheet({
         </div>
       ) : picker === 'camera' ? (
         <CameraPicker onPick={(cameraId) => place('camera', { cameraId })} />
+      ) : picker === 'nestCamera' ? (
+        <NestCameraPicker onPick={(nestDeviceId) => place('nestCamera', { nestDeviceId })} />
       ) : picker === 'birdnet' ? (
         <BirdNetPicker onPick={(birdnetUrl) => place('birdnet', { birdnetUrl })} />
       ) : picker === 'news' ? (
@@ -125,7 +127,7 @@ export function AddTileSheet({
                 type="button"
                 disabled={alreadyPlaced}
                 onClick={() =>
-                  type === 'list' || type === 'news' || type === 'camera' || type === 'birdnet'
+                  type === 'list' || type === 'news' || type === 'camera' || type === 'birdnet' || type === 'nestCamera'
                     ? setPicker(type)
                     : place(type)
                 }
@@ -236,6 +238,41 @@ function BirdNetPicker({ onPick }: { onPick: (url: string) => void }) {
       <BigButton onClick={() => void testAndAdd()} disabled={!/^https?:\/\/.+/i.test(url.trim()) || testing}>
         {testing ? 'Testing…' : 'Test & place tile'}
       </BigButton>
+    </div>
+  )
+}
+
+/** Google Home / Nest cameras from Device Access. */
+function NestCameraPicker({ onPick }: { onPick: (deviceId: string) => void }) {
+  const { data: cameras, isPending, error } = useQuery({
+    queryKey: ['nestCameras'],
+    queryFn: () => ipcInvoke('nest:listCameras', undefined),
+    retry: 1
+  })
+  if (isPending) return <p className="pb-2 text-base font-semibold text-ink-faint">Looking for cameras…</p>
+  if (error)
+    return (
+      <p className="pb-2 text-base font-semibold text-ink-faint">
+        Connect Google Home cameras first: Settings → General → Cameras.
+      </p>
+    )
+  if (!cameras?.length)
+    return <p className="pb-2 text-base font-semibold text-ink-faint">No cameras were shared with OpenSkyLight.</p>
+  return (
+    <div className="flex flex-col gap-2 pb-2">
+      {cameras.map((camera) => (
+        <button
+          key={camera.id}
+          type="button"
+          onClick={() => onPick(camera.id)}
+          className="pressable rounded-2xl bg-paper-deep/50 p-4 text-left"
+        >
+          <span className="block text-lg font-bold">{camera.name}</span>
+          {!camera.webrtc && (
+            <span className="block text-sm font-semibold text-ink-faint">Older camera — shows a Google Home button</span>
+          )}
+        </button>
+      ))}
     </div>
   )
 }

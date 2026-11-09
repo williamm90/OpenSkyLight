@@ -9,7 +9,9 @@ import type {
   EventUpdateInput,
   PersonCreateInput,
   PersonUpdateInput,
-  AppSettings
+  AppSettings,
+  ContactCreateInput,
+  ContactUpdateInput
 } from '@shared/types'
 import type { DateRange } from '@shared/dates'
 import { useToasts } from '../stores/toastStore'
@@ -320,6 +322,60 @@ export function useCompanionMutations() {
   }
 }
 
+export function useContacts() {
+  return useQuery({ queryKey: ['contacts'], queryFn: () => ipcInvoke('contacts:list', undefined) })
+}
+
+export function useContactMutations() {
+  const keys = [['contacts']]
+  return {
+    create: useInvalidatingMutation((input: ContactCreateInput) => ipcInvoke('contacts:create', input), keys),
+    update: useInvalidatingMutation((input: ContactUpdateInput) => ipcInvoke('contacts:update', input), keys),
+    remove: useInvalidatingMutation((input: { id: string }) => ipcInvoke('contacts:delete', input), keys)
+  }
+}
+
+export function useAlbumStatus() {
+  return useQuery({
+    queryKey: ['albumStatus'],
+    queryFn: () => ipcInvoke('album:getStatus', undefined),
+    refetchInterval: (q) => (q.state.data?.syncing ? 2_000 : 30_000)
+  })
+}
+
+export function useAlbumRefresh() {
+  return useInvalidatingMutation(() => ipcInvoke('album:refresh', undefined), [['albumStatus']])
+}
+
+export function useGooglePasteBack() {
+  const calendarKeys = [['googleStatus'], ['remoteCalendars'], ['calendars'], ['occurrences'], ['syncStatus']]
+  return {
+    begin: useInvalidatingMutation(() => ipcInvoke('google:beginPasteBack', undefined), []),
+    finish: useInvalidatingMutation((input: { url: string }) => ipcInvoke('google:finishPasteBack', input), calendarKeys)
+  }
+}
+
+export function useNestStatus() {
+  return useQuery({ queryKey: ['nestStatus'], queryFn: () => ipcInvoke('nest:getStatus', undefined) })
+}
+
+export function useNestMutations() {
+  const keys = [['nestStatus'], ['nestCameras']]
+  return {
+    setCredentials: useInvalidatingMutation(
+      (input: { projectId: string; clientId: string; clientSecret: string }) => ipcInvoke('nest:setCredentials', input),
+      keys
+    ),
+    begin: useInvalidatingMutation(() => ipcInvoke('nest:beginConnect', undefined), []),
+    finish: useInvalidatingMutation((input: { url: string }) => ipcInvoke('nest:finishConnect', input), keys),
+    disconnect: useInvalidatingMutation(() => ipcInvoke('nest:disconnect', undefined), keys)
+  }
+}
+
+export function useIssuePairCode() {
+  return useInvalidatingMutation(() => ipcInvoke('display:issuePairCode', undefined), [])
+}
+
 /** Refetch when the main process announces data changes (sync engine, other windows). */
 export function usePushInvalidation(): void {
   const queryClient = useQueryClient()
@@ -330,6 +386,10 @@ export function usePushInvalidation(): void {
       if (domain === 'events') void queryClient.invalidateQueries({ queryKey: ['occurrences'] })
       else if (domain) void queryClient.invalidateQueries({ queryKey: [domain] })
       if (domain === 'calendars') void queryClient.invalidateQueries({ queryKey: ['occurrences'] })
+      if (domain === 'photos') {
+        void queryClient.invalidateQueries({ queryKey: ['screensaverPhotos'] })
+        void queryClient.invalidateQueries({ queryKey: ['albumStatus'] })
+      }
       if (domain === 'chores') {
         // chore day views and star balances key off their own roots
         void queryClient.invalidateQueries({ queryKey: ['choresDay'] })
@@ -339,6 +399,10 @@ export function usePushInvalidation(): void {
     const offStatus = window.osl.on('push:syncStatus', () => {
       void queryClient.invalidateQueries({ queryKey: ['syncStatus'] })
     })
+    // web displays: the push stream dropped and came back, so anything may be stale
+    const offReconnect = window.osl.on('push:reconnected', () => {
+      void queryClient.invalidateQueries()
+    })
     const offConflict = window.osl.on('push:syncConflict', (data) => {
       const title = (data as { title?: string })?.title ?? 'An event'
       pushToast(`"${title}" was changed elsewhere — showing the latest version`)
@@ -346,6 +410,7 @@ export function usePushInvalidation(): void {
     return () => {
       offData()
       offStatus()
+      offReconnect()
       offConflict()
     }
   }, [queryClient, pushToast])

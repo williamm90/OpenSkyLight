@@ -8,3 +8,6 @@ Thumbs.db
 *.log
 .vite/
 coverage/
+
+# home server data (database, encryption key, photo cache)
+data/

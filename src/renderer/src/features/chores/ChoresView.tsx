@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { DateTime } from 'luxon'
 import type { DayChoreDto, PersonDto } from '@shared/types'
-import { useBalances, useChoreMutations, useChoresDay, usePeople } from '../../api/hooks'
+import { useBalances, useChoreMutations, useChoresDay, usePeople, useRewards } from '../../api/hooks'
 import { useUi, ZONE } from '../../stores/uiStore'
-import { initials, isToday, textOn } from '../../lib/format'
+import { isToday, textOn } from '../../lib/format'
 import { CheckIcon, MoonIcon, SunIcon } from '../../components/icons'
 import { BigButton } from '../../components/ui'
 import { RewardsDialog } from './RewardsDialog'
+import { StickerCard, useStickerBurst } from '../stickers/StickerCard'
+import { Avatar } from '../../components/Avatar'
+
+type Burst = (personId: string, spot: number) => void
 
 function StarBadge({ count }: { count: number }) {
   return (
@@ -21,18 +25,24 @@ function ChoreRow({
   chore,
   person,
   date,
-  canCheck
+  canCheck,
+  onEarned
 }: {
   chore: DayChoreDto
   person: PersonDto
   date: string
   canCheck: boolean
+  onEarned: Burst
 }) {
   const mutations = useChoreMutations()
   const toggle = (): void => {
     if (!canCheck) return
     if (chore.completed) mutations.uncomplete.mutate({ choreId: chore.choreId, date })
-    else mutations.complete.mutate({ choreId: chore.choreId, date })
+    else
+      mutations.complete.mutate(
+        { choreId: chore.choreId, date },
+        { onSuccess: (res) => chore.starsValue > 0 && onEarned(person.id, Math.max(0, res.balance - 1)) }
+      )
   }
   return (
     <button
@@ -62,9 +72,23 @@ function ChoreRow({
   )
 }
 
-function PersonColumn({ person, chores, date, canCheck }: { person: PersonDto; chores: DayChoreDto[]; date: string; canCheck: boolean }) {
+function PersonColumn({
+  person,
+  chores,
+  date,
+  canCheck,
+  onEarned
+}: {
+  person: PersonDto
+  chores: DayChoreDto[]
+  date: string
+  canCheck: boolean
+  onEarned: Burst
+}) {
   const { data: balances = [] } = useBalances()
+  const { data: rewards = [] } = useRewards()
   const balance = balances.find((b) => b.personId === person.id)?.balance ?? 0
+  const goal = rewards.find((r) => r.id === person.goalRewardId) ?? null
   const groups: { key: string; label: string | null; Icon: typeof SunIcon | null; items: DayChoreDto[] }[] = [
     { key: 'morning', label: 'Morning', Icon: SunIcon, items: chores.filter((c) => c.routine === 'morning') },
     { key: 'anytime', label: null, Icon: null, items: chores.filter((c) => c.routine === null) },
@@ -74,20 +98,19 @@ function PersonColumn({ person, chores, date, canCheck }: { person: PersonDto; c
 
   return (
     <div className="flex min-h-0 w-80 shrink-0 flex-col rounded-card bg-paper-deep/40 p-3">
-      <div className="mb-3 flex items-center gap-3">
-        <span
-          className="flex h-12 w-12 items-center justify-center rounded-full text-base font-extrabold"
-          style={{ backgroundColor: person.color, color: textOn(person.color) }}
-        >
-          {initials(person.name)}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-xl font-bold">{person.name}</div>
-          <div className="text-sm font-bold text-ink-faint">
-            {doneCount}/{chores.length} done
+      <div className="mb-3 flex flex-col gap-2">
+        {person.role === 'child' ? (
+          <StickerCard person={person} goal={goal} balance={balance} size="small" />
+        ) : (
+          <div className="flex items-center gap-3">
+            <Avatar name={person.name} color={person.color} photo={person.photo} size={48} />
+            <div className="min-w-0 flex-1 truncate text-xl font-bold">{person.name}</div>
+            <StarBadge count={balance} />
           </div>
+        )}
+        <div className="px-1 text-sm font-bold text-ink-faint">
+          {doneCount}/{chores.length} done today
         </div>
-        <StarBadge count={balance} />
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
         {groups.map((g) => (
@@ -99,7 +122,7 @@ function PersonColumn({ person, chores, date, canCheck }: { person: PersonDto; c
               </div>
             )}
             {g.items.map((c) => (
-              <ChoreRow key={c.choreId} chore={c} person={person} date={date} canCheck={canCheck} />
+              <ChoreRow key={c.choreId} chore={c} person={person} date={date} canCheck={canCheck} onEarned={onEarned} />
             ))}
           </div>
         ))}
@@ -115,6 +138,7 @@ export function ChoresView() {
   const { data: people = [] } = usePeople()
   const { data: chores = [] } = useChoresDay(focusedDate)
   const [rewardsOpen, setRewardsOpen] = useState(false)
+  const sticker = useStickerBurst()
   const day = DateTime.fromISO(focusedDate, { zone: ZONE })
   // checking off chores for other days is allowed only for today and the past
   const canCheck = focusedDate <= DateTime.now().setZone(ZONE).toISODate()!
@@ -154,13 +178,20 @@ export function ChoresView() {
         <div className="flex min-h-0 flex-1 justify-center gap-4 overflow-x-auto">
           {columns.map((person, i) => (
             <div key={person.id} className="animate-rise flex min-h-0" style={{ animationDelay: `${i * 60}ms` }}>
-              <PersonColumn person={person} chores={byPerson.get(person.id)!} date={focusedDate} canCheck={canCheck} />
+              <PersonColumn
+                person={person}
+                chores={byPerson.get(person.id)!}
+                date={focusedDate}
+                canCheck={canCheck}
+                onEarned={sticker.burst}
+              />
             </div>
           ))}
         </div>
       )}
 
       <RewardsDialog open={rewardsOpen} onClose={() => setRewardsOpen(false)} />
+      {sticker.node}
     </div>
   )
 }

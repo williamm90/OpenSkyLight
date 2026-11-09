@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { create } from 'zustand'
 import Keyboard from 'react-simple-keyboard'
 import 'react-simple-keyboard/build/css/index.css'
+import { useSettings } from '../api/hooks'
+import { isWebMode } from '../api/webBridge'
 
 interface OskTarget {
   id: string
@@ -29,6 +31,13 @@ export const useOsk = create<OskState>((set) => ({
   bump: () => set((s) => ({ echo: s.echo + 1 }))
 }))
 
+/** 'auto' = built-in keyboard in the desktop app, the device's own keyboard in a browser. */
+function useBuiltInKeyboard(): boolean {
+  const { data: settings } = useSettings()
+  const mode = settings?.onScreenKeyboard ?? 'auto'
+  return mode === 'on' || (mode === 'auto' && !isWebMode())
+}
+
 export function OskInput({
   value,
   onChange,
@@ -48,6 +57,7 @@ export function OskInput({
   valRef.current = value
   cbRef.current = onChange
   const { open, bump, target } = useOsk()
+  const builtIn = useBuiltInKeyboard()
 
   return (
     <input
@@ -55,8 +65,10 @@ export function OskInput({
       value={value}
       placeholder={placeholder}
       autoFocus={autoFocus}
+      // with the built-in keyboard up, keep a tablet's own keyboard from also popping up
+      inputMode={builtIn ? 'none' : undefined}
       onFocus={(e) => {
-        open({ id, get: () => valRef.current, set: (v) => cbRef.current(v) })
+        if (builtIn) open({ id, get: () => valRef.current, set: (v) => cbRef.current(v) })
         e.target.scrollIntoView({ block: 'center', behavior: 'smooth' })
       }}
       onBlur={() => {

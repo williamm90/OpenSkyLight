@@ -11,9 +11,12 @@ const MAX_TOKENS = 20
  * parent scans. A 256-bit random token needs no stretching — sha256 +
  * timingSafeEqual is the right tool here, scrypt is for low-entropy PINs.
  */
-export function createCompanionTokens(settings: Pick<SettingsService, 'getRaw' | 'setRaw' | 'deleteRaw'>) {
+export function createCompanionTokens(
+  settings: Pick<SettingsService, 'getRaw' | 'setRaw' | 'deleteRaw'>,
+  storeKey: string = STORE_KEY
+) {
   function readHashes(): string[] {
-    const raw = settings.getRaw(STORE_KEY)
+    const raw = settings.getRaw(storeKey)
     if (!raw) return []
     try {
       const parsed = JSON.parse(raw)
@@ -29,7 +32,7 @@ export function createCompanionTokens(settings: Pick<SettingsService, 'getRaw' |
   function issue(): string {
     const token = randomBytes(32).toString('base64url')
     const hashes = [...readHashes(), hashOf(token)].slice(-MAX_TOKENS)
-    settings.setRaw(STORE_KEY, JSON.stringify(hashes))
+    settings.setRaw(storeKey, JSON.stringify(hashes))
     return token
   }
 
@@ -45,7 +48,7 @@ export function createCompanionTokens(settings: Pick<SettingsService, 'getRaw' |
   }
 
   function revokeAll(): void {
-    settings.deleteRaw(STORE_KEY)
+    settings.deleteRaw(storeKey)
   }
 
   function count(): number {

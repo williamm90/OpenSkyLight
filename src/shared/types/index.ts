@@ -6,12 +6,17 @@ export interface PersonDto {
   color: string
   role: PersonRole
   sortOrder: number
+  /** small JPEG/PNG data URL, or null to show the initial */
+  photo: string | null
+  /** reward this person's sticker card works toward */
+  goalRewardId: string | null
 }
 
 export interface PersonCreateInput {
   name: string
   color: string
   role: PersonRole
+  photo?: string | null
 }
 
 export interface PersonUpdateInput {
@@ -19,6 +24,35 @@ export interface PersonUpdateInput {
   name?: string
   color?: string
   role?: PersonRole
+  sortOrder?: number
+  photo?: string | null
+  goalRewardId?: string | null
+}
+
+/** Someone the kids can call with one tap. */
+export interface ContactDto {
+  id: string
+  name: string
+  /** E.164-ish phone number, e.g. +15551234567 */
+  phone: string
+  photo: string | null
+  color: string
+  sortOrder: number
+}
+
+export interface ContactCreateInput {
+  name: string
+  phone: string
+  photo?: string | null
+  color: string
+}
+
+export interface ContactUpdateInput {
+  id: string
+  name?: string
+  phone?: string
+  photo?: string | null
+  color?: string
   sortOrder?: number
 }
 
@@ -160,6 +194,10 @@ export type HomeTileType =
   | 'camera'
   | 'birdnet'
   | 'timer'
+  | 'callFamily'
+  | 'stickers'
+  | 'googleHome'
+  | 'nestCamera'
 
 export interface HomeTileConfig {
   /** 'list' tiles: which list to show */
@@ -170,6 +208,24 @@ export interface HomeTileConfig {
   cameraId?: string
   /** 'birdnet' tiles: the BirdNET-Go base URL on the LAN */
   birdnetUrl?: string
+  /** 'nestCamera' tiles: Google Device Access device id */
+  nestDeviceId?: string
+}
+
+/** A Google Home / Nest camera from Device Access. */
+export interface NestCameraDto {
+  id: string
+  name: string
+  room: string | null
+  /** false for older cameras that only offer RTSP (not playable on the tablet yet) */
+  webrtc: boolean
+}
+
+export interface NestStatusDto {
+  configured: boolean
+  connected: boolean
+  projectId: string | null
+  error: string | null
 }
 
 export interface CameraDto {
@@ -301,6 +357,26 @@ export interface AppSettings {
   homeLayout: HomeTile[]
   /** LAN companion web app (phones editing lists/meals/chores) */
   companion: { enabled: boolean; port: number }
+  /** iCloud shared album ("Public Website" link) for family photos */
+  album: { url: string | null }
+  /**
+   * How call buttons dial: 'tel' hands a tel: link to Android (pick Google
+   * Voice once as the default); 'googleVoice' targets the Google Voice app
+   * directly with an Android intent link.
+   */
+  calling: { method: 'tel' | 'googleVoice' }
+  /** Cameras tile: open the Google Home app or website; ask for the parent PIN first? */
+  cameras: {
+    open: 'app' | 'web'
+    requirePin: boolean
+    /** Live camera tiles: start when tapped (easy on battery cameras) or stay live while on screen */
+    live: 'tap' | 'always'
+  }
+  /**
+   * Built-in on-screen keyboard. 'auto' = on in the desktop app, off in a
+   * browser (tablets bring their own keyboard).
+   */
+  onScreenKeyboard: 'auto' | 'on' | 'off'
 }
 
 import { DEFAULT_HOME_LAYOUT } from '../home'
@@ -316,7 +392,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   screensaver: { folder: null, idleMinutes: 10 },
   launchOnStartup: false,
   homeLayout: DEFAULT_HOME_LAYOUT,
-  companion: { enabled: false, port: 8420 }
+  companion: { enabled: false, port: 8420 },
+  album: { url: null },
+  calling: { method: 'googleVoice' },
+  cameras: { open: 'app', requirePin: true, live: 'tap' },
+  onScreenKeyboard: 'auto'
 }
 
 /** Touch-friendly person color palette (Skylight-style) */

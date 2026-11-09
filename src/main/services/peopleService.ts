@@ -13,7 +13,9 @@ function toDto(row: typeof people.$inferSelect): PersonDto {
     name: row.name,
     color: row.color,
     role: row.role,
-    sortOrder: row.sortOrder
+    sortOrder: row.sortOrder,
+    photo: row.photo ?? null,
+    goalRewardId: row.goalRewardId ?? null
   }
 }
 
@@ -35,11 +37,18 @@ export function createPeopleService(db: AppDb) {
       name: input.name,
       color: input.color,
       role: input.role,
+      photo: input.photo ?? null,
       sortOrder: (maxSort ?? 0) + 1,
       createdAt: isoUtc(DateTime.utc())
     }
     db.insert(people).values(row).run()
-    return toDto({ ...row, avatarPath: null, deletedAt: null, sortOrder: row.sortOrder! } as typeof people.$inferSelect)
+    return toDto({
+      ...row,
+      avatarPath: null,
+      goalRewardId: null,
+      deletedAt: null,
+      sortOrder: row.sortOrder!
+    } as typeof people.$inferSelect)
   }
 
   function update(input: PersonUpdateInput): PersonDto {
@@ -48,6 +57,8 @@ export function createPeopleService(db: AppDb) {
     if (input.color !== undefined) patch.color = input.color
     if (input.role !== undefined) patch.role = input.role
     if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder
+    if (input.photo !== undefined) patch.photo = input.photo
+    if (input.goalRewardId !== undefined) patch.goalRewardId = input.goalRewardId
     const result = db
       .update(people)
       .set(patch)
